@@ -10,7 +10,10 @@ from __future__ import with_statement, division, print_function, absolute_import
 
 import logging
 from sys import argv, exit
-from time import monotonic
+try:
+    from time import monotonic
+except ImportError:
+    from time import time as monotonic
 from functools import partial
 
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
@@ -28,12 +31,12 @@ class DistFS(LoggingMixIn, Operations):
         self.socket = context.socket(zmq.REQ)
         self.socket.connect('tcp://%s:%s' % (host, port))
 
-    def _remote_call(self, *args):
-        self.socket.send_pyobj(args)
+    def _remote_call(self, op, *args):
+        self.socket.send_pyobj([op, args])
         errno, ret = self.socket.recv_pyobj()
         if errno is not None:
             raise FuseOSError(errno)
-        print('[%8.3f] %r -> %r' % (monotonic(), args, ret))
+        print('[%13.3f] %s: %r -> %r' % (monotonic(), op, args, ret))
         return ret
 
     def chmod(self, path, mode):

@@ -13,7 +13,11 @@ from collections import defaultdict
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from sys import argv, exit
-from time import time, monotonic
+from time import time
+try:
+    from time import monotonic
+except ImportError:
+    from time import time as monotonic
 
 from fuse import FuseOSError
 
@@ -26,14 +30,14 @@ class ZMQFS(object):
         self.operations = operations
         context = zmq.Context()
         self.socket = context.socket(zmq.REP)
-        print('[%8.3f] Starting ZMQFS Server on tcp://%s:%s' % (monotonic(), host, port))
+        print('[%13.3f] Starting ZMQFS Server on tcp://%s:%s' % (monotonic(), host, port))
         self.socket.bind('tcp://%s:%s' % (host, port))
 
     def run(self):
         while True:
             #  Wait for next request from client
-            op, *args = self.socket.recv_pyobj()
-            print('[%8.3f] %s: %r' % (monotonic(), op, args))
+            op, args = self.socket.recv_pyobj()
+            print('[%13.3f] %s: %r' % (monotonic(), op, args))
 
             #  Send reply back to client
             try:
