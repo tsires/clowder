@@ -23,6 +23,7 @@ import msgpack
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 from kazoo.client import KazooClient
 from kazoo.exceptions import NodeExistsError, NoNodeError, NotEmptyError
+from kazoo.protocol.states import EventType
 
 class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
@@ -30,6 +31,8 @@ class DistFS(LoggingMixIn, Operations):
     FILESYSTEMS = posixpath.join('fs', 'trees')
 
     def __init__(self, fs_root, zk_hosts=None):
+        self._meta_cache = {}
+        self._children_cache = {}
         if zk_hosts is None:
             zk_hosts = [('127.0.0.1', '2181')]
         hosts = ','.join(':'.join(host) for host in zk_hosts) 
@@ -63,6 +66,34 @@ class DistFS(LoggingMixIn, Operations):
     def _zk_path(self, path):
         return posixpath.normpath(posixpath.join(self.FILESYSTEMS, self.fs_root, posixpath.relpath(path, '/')))
 
+    def _get_meta(self, path):
+        try:
+            return self._meta_cache[path]
+        except KeyError:
+            meta = msgpack.loads(self.zk.get(path, watch=self._cache_expire)[0], encoding='utf-8')
+            self._meta_cache[path] = meta
+            return meta
+
+    def _get_children(self, path):
+        try:
+            return self._children_cache[path]
+        except KeyError:
+            children = self.zk.get_children(path, watch=self._cache_expire)
+            self._children_cache[path] = children
+            return children
+
+    def _cache_expire(self, event):
+        if event.type == EventType.CHILD:
+            try:
+                del self._children_cache[event.path]
+            except KeyError:
+                pass
+        else:
+            try:
+                del self._meta_cache[event.path]
+            except KeyError:
+                pass
+
     def chmod(self, path, mode):
         path = self._zk_path(path)
         return self._op_stub('chmod', path, mode)
@@ -94,7 +125,7 @@ class DistFS(LoggingMixIn, Operations):
     def getattr(self, path, fh=None):
         path = self._zk_path(path)
         try:
-            meta = msgpack.loads(self.zk.get(path)[0], encoding='utf-8')
+            meta = self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         return meta
@@ -126,7 +157,7 @@ class DistFS(LoggingMixIn, Operations):
                 st_atime=now,
                 )
         try:
-            parent_meta = msgpack.loads(self.zk.get(parent)[0], encoding='utf-8')
+            parent_meta = self._get_meta(parent)
             parent_meta['st_nlink'] += 1
             trans = self.zk.transaction()
             trans.set_data(parent, msgpack.dumps(parent_meta))
@@ -144,7 +175,7 @@ class DistFS(LoggingMixIn, Operations):
     def read(self, path, size, offset, fh):
         path = self._zk_path(path)
         try:
-            self.zk.get(path)
+            self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         # FIXME: replace stub with actual implementation
@@ -153,7 +184,7 @@ class DistFS(LoggingMixIn, Operations):
     def readdir(self, path, fh):
         path = self._zk_path(path)
         try:
-            files = self.zk.get_children(path)
+            files = self._get_children(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         return ['.', '..'] + files
@@ -161,7 +192,7 @@ class DistFS(LoggingMixIn, Operations):
     def readlink(self, path):
         path = self._zk_path(path)
         try:
-            self.zk.get(path)
+            self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         # FIXME: replace stub with actual implementation
@@ -170,7 +201,7 @@ class DistFS(LoggingMixIn, Operations):
     def removexattr(self, path, name):
         path = self._zk_path(path)
         try:
-            meta = msgpack.loads(self.zk.get(path)[0], encoding='utf-8')
+            meta = self._get_meta(path)
             attrs = meta.get('attrs', {})
             try:
                 del attrs[name]
@@ -186,9 +217,9 @@ class DistFS(LoggingMixIn, Operations):
         newpath = self._zk_path(newpath)
         try:
             # FIXME: This will not relocate an entire directory tree
-            meta_raw = self.zk.get(oldpath)[0]
+            meta = self._get_meta(path)
             trans = self.zk.transaction()
-            trans.create(newpath, meta_raw)
+            trans.create(newpath, msgpack.dumps(meta))
             trans.delete(oldpath)
             trans.commit()
         except NodeExistsError as e:
@@ -202,7 +233,7 @@ class DistFS(LoggingMixIn, Operations):
         path = self._zk_path(path)
         parent = posixpath.dirname(path)
         try:
-            parent_meta = msgpack.loads(self.zk.get(parent)[0], encoding='utf-8')
+            parent_meta = self._get_meta(parent)
             parent_meta['st_nlink'] -= 1
             trans = self.zk.transaction()
             trans.set_data(parent, msgpack.dumps(parent_meta))
@@ -216,7 +247,7 @@ class DistFS(LoggingMixIn, Operations):
     def setxattr(self, path, name, value, options, position=0):
         path = self._zk_path(path)
         try:
-            meta = msgpack.loads(self.zk.get(path)[0], encoding='utf-8')
+            meta = self._get_meta(path)
             attrs = meta.setdefault('attrs', {})
             attrs[name] = value
             self.zk.set(path, msgpack.dumps(meta))
@@ -246,7 +277,7 @@ class DistFS(LoggingMixIn, Operations):
     def truncate(self, path, length, fh=None):
         path = self._zk_path(path)
         try:
-            self.zk.get(path)
+            self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         # FIXME: replace stub with actual implementation
@@ -265,7 +296,7 @@ class DistFS(LoggingMixIn, Operations):
         now = time()
         atime, mtime = times if times else (now, now)
         try:
-            meta = msgpack.loads(self.zk.get(path)[0], encoding='utf-8')
+            meta = self._get_meta(path)
             meta.update(st_atime=atime, st_mtime=mtime)
             self.zk.set(path, msgpack.dumps(meta))
         except NoNodeError as e:
@@ -274,7 +305,7 @@ class DistFS(LoggingMixIn, Operations):
     def write(self, path, data, offset, fh):
         path = self._zk_path(path)
         try:
-            self.zk.get(path)
+            self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         # FIXME: replace stub with actual implementation
