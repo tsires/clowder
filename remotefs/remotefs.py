@@ -3,7 +3,7 @@
 
 Project for CSCI 6450
 
-Usage: ./distfs <mountpoint> <host> <port>
+Usage: ./remotefs.py <mountpoint> <host> <port>
 """
 
 from __future__ import with_statement, division, print_function, absolute_import, unicode_literals
@@ -23,7 +23,7 @@ import zmq
 if not hasattr(__builtins__, 'bytes'):
     bytes = str
 
-class DistFS(LoggingMixIn, Operations):
+class RemoteFS(LoggingMixIn, Operations):
     'Remote filesystem. Passes all calls to a listening ZMQFS instance.'
 
     def __init__(self, host='localhost', port='1234'):
@@ -109,4 +109,4 @@ if __name__ == '__main__':
         exit(1)
 
     logging.getLogger().setLevel(logging.DEBUG)
-    fuse = FUSE(DistFS(host=argv[2], port=argv[3]), argv[1], foreground=True)
+    fuse = FUSE(RemoteFS(host=argv[2], port=argv[3]), argv[1], foreground=True)
