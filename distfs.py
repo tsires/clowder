@@ -28,11 +28,13 @@ from kazoo.protocol.states import EventType
 class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
-    FILESYSTEMS = posixpath.join('fs', 'trees')
+    FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
 
     def __init__(self, fs_root, zk_hosts=None):
         self._meta_cache = {}
         self._children_cache = {}
+        self._cache_tries = 0
+        self._cache_misses = 0
         if zk_hosts is None:
             zk_hosts = [('127.0.0.1', '2181')]
         hosts = ','.join(':'.join(host) for host in zk_hosts) 
@@ -67,32 +69,30 @@ class DistFS(LoggingMixIn, Operations):
         return posixpath.normpath(posixpath.join(self.FILESYSTEMS, self.fs_root, posixpath.relpath(path, '/')))
 
     def _get_meta(self, path):
+        self._cache_tries += 1
         try:
             return self._meta_cache[path]
         except KeyError:
+            self._cache_misses += 1
             meta = msgpack.loads(self.zk.get(path, watch=self._cache_expire)[0], encoding='utf-8')
             self._meta_cache[path] = meta
             return meta
 
     def _get_children(self, path):
+        self._cache_tries += 1
         try:
             return self._children_cache[path]
         except KeyError:
+            self._cache_misses += 1
             children = self.zk.get_children(path, watch=self._cache_expire)
             self._children_cache[path] = children
             return children
 
     def _cache_expire(self, event):
         if event.type == EventType.CHILD:
-            try:
-                del self._children_cache[event.path]
-            except KeyError:
-                pass
+            del self._children_cache[event.path]
         else:
-            try:
-                del self._meta_cache[event.path]
-            except KeyError:
-                pass
+            del self._meta_cache[event.path]
 
     def chmod(self, path, mode):
         path = self._zk_path(path)
@@ -321,6 +321,9 @@ if __name__ == '__main__':
 
     logging.getLogger('fuse.log-mixin').setLevel(logging.DEBUG)
     logging.getLogger().setLevel(logging.DEBUG)
-    fuse = FUSE(DistFS(fs_root=argv[1]), argv[2], foreground=True)
+    distfs = DistFS(fs_root=argv[1])
+    fuse = FUSE(distfs, argv[2], foreground=True)
+    print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
+
 
 # vim: sw=4 ts=4 expandtab
