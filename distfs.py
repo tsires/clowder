@@ -60,7 +60,7 @@ class DistFS(LoggingMixIn, Operations):
         print('[%13.3f] [STUB] %s: %r' % (monotonic(), op, args))
 
     def _zk_path(self, path):
-        return posixpath.normpath(posixpath.join(self.FILESYSTEMS, self.fs_root, posixpath.relpath(path, '/')))
+        return posixpath.join(self.FILESYSTEMS, self.fs_root, path.lstrip('/'))
 
     def _get_meta(self, path):
         self._cache_tries += 1
