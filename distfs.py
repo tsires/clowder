@@ -46,14 +46,14 @@ class DistFS(LoggingMixIn, Operations):
     def bootstrap(self):
         path = self._zk_path('/')
         now = time()
-        meta = dict(
+        meta = dict(attrs=dict(
                 st_mode=(S_IFDIR | 0o755),
                 st_nlink=2,
                 st_size=0,
                 st_ctime=now,
                 st_mtime=now,
                 st_atime=now,
-                )
+                ))
         try:
             self.zk.create(path, msgpack.dumps(meta), makepath=True)
         except NodeExistsError as e:
