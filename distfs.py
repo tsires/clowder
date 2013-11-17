@@ -25,17 +25,20 @@ from kazoo.client import KazooClient
 from kazoo.exceptions import NodeExistsError, NoNodeError, NotEmptyError
 from kazoo.protocol.states import EventType
 
+from chunk.client import DummyChunkClient
+
 class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
     FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
 
-    def __init__(self, zk, fs_root):
+    def __init__(self, zk, chunk_client, fs_root):
         self._meta_cache = {}
         self._children_cache = {}
         self._cache_tries = 0
         self._cache_misses = 0
         self.zk = zk
+        self.chunk_client = chunk_client
         self.fs_root = fs_root
         # Internal FD counter
         self.fd = 0
@@ -99,14 +102,14 @@ class DistFS(LoggingMixIn, Operations):
     def create(self, path, mode):
         path = self._zk_path(path)
         now = time()
-        meta = dict(
+        meta = dict(data=[],attrs=dict(
                 st_mode=(S_IFREG | mode),
                 st_nlink=1,
                 st_size=0,
                 st_ctime=now,
                 st_mtime=now,
                 st_atime=now,
-                )
+                ))
         try:
             self.zk.create(path, msgpack.dumps(meta))
         except NodeExistsError as e:
@@ -122,23 +125,23 @@ class DistFS(LoggingMixIn, Operations):
             meta = self._get_meta(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
-        return meta
+        return meta['attrs']
 
     def mkdir(self, path, mode):
         path = self._zk_path(path)
         parent = posixpath.dirname(posixpath.normpath(path))
         now = time()
-        meta = dict(
+        meta = dict(attrs=dict(
                 st_mode=(S_IFDIR | mode),
                 st_nlink=2,
                 st_size=0,
                 st_ctime=now,
                 st_mtime=now,
                 st_atime=now,
-                )
+                ))
         try:
             parent_meta = self._get_meta(parent)
-            parent_meta['st_nlink'] += 1
+            parent_meta['attrs']['st_nlink'] += 1
             trans = self.zk.transaction()
             trans.set_data(parent, msgpack.dumps(parent_meta))
             trans.create(path, msgpack.dumps(meta))
@@ -200,7 +203,7 @@ class DistFS(LoggingMixIn, Operations):
         parent = posixpath.dirname(path)
         try:
             parent_meta = self._get_meta(parent)
-            parent_meta['st_nlink'] -= 1
+            parent_meta['attrs']['st_nlink'] -= 1
             trans = self.zk.transaction()
             trans.set_data(parent, msgpack.dumps(parent_meta))
             trans.delete(path)
@@ -217,11 +220,11 @@ class DistFS(LoggingMixIn, Operations):
     def symlink(self, oldpath, newpath):
         newpath = self._zk_path(newpath)
         now = time()
-        meta = dict(
+        meta = dict(target=oldpath,attrs=dict(
                 st_mode=(S_IFLNK | 0o777),
                 st_nlink=1,
                 st_size=0,
-                )
+                ))
         try:
             self.zk.create(path, msgpack.dumps(meta))
         except NodeExistsError as e:
@@ -253,7 +256,7 @@ class DistFS(LoggingMixIn, Operations):
         atime, mtime = times if times else (now, now)
         try:
             meta = self._get_meta(path)
-            meta.update(st_atime=atime, st_mtime=mtime)
+            meta['attrs'].update(st_atime=atime, st_mtime=mtime)
             self.zk.set(path, msgpack.dumps(meta))
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
@@ -279,8 +282,11 @@ def main(argv):
     zk = KazooClient(hosts=hosts)
     zk.start()
 
+    # ChunkClient
+    cc = DummyChunkClient('/tmp/chunkcache')
+
     # DistFS
-    distfs = DistFS(zk=zk, fs_root=argv[1])
+    distfs = DistFS(zk=zk, chunk_client=cc, fs_root=argv[1])
     distfs.bootstrap()
 
     fuse = FUSE(distfs, argv[2], foreground=True, nothreads=True)
