@@ -312,19 +312,20 @@ class DistFS(LoggingMixIn, Operations):
         return len(data)
 
 
-def main():
-    from sys import argv, exit
-    import logging
+def main(argv):
     if len(argv) != 3:
         print('usage: %s <root_name> <mountpoint>' % argv[0])
-        exit(1)
+        return 1
 
-    logging.basicConfig(level=logging.DEBUG)
     distfs = DistFS(fs_root=argv[1])
     fuse = FUSE(distfs, argv[2], foreground=True)
     print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
+    return 0
 
 if __name__ == '__main__':
-    main()
+    from sys import argv, exit
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+    exit(main(argv))
 
 # vim: sw=4 ts=4 expandtab
