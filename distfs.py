@@ -130,20 +130,6 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
         return meta
 
-    def getxattr(self, path, name, position=0):
-        attrs = self.getattr(path).get('attrs', {})
-        try:
-            return attrs[name]
-        except KeyError:
-            # FIXME: Should return ENOATTR?
-            return b''
-
-        return self._op_stub('getxattr', path, name, position)
-
-    def listxattr(self, path):
-        attrs = self.getattr(path).get('attrs', {})
-        return attrs.keys()
-
     def mkdir(self, path, mode):
         path = self._zk_path(path)
         parent = posixpath.dirname(posixpath.normpath(path))
@@ -198,20 +184,6 @@ class DistFS(LoggingMixIn, Operations):
         # FIXME: replace stub with actual implementation
         return b''
 
-    def removexattr(self, path, name):
-        path = self._zk_path(path)
-        try:
-            meta = self._get_meta(path)
-            attrs = meta.get('attrs', {})
-            try:
-                del attrs[name]
-            except KeyError:
-                # FIXME: Should return ENOATTR?
-                pass
-            self.zk.set(path, msgpack.dumps(meta))
-        except NoNodeError as e:
-            raise FuseOSError(ENOENT) from e
-
     def rename(self, oldpath, newpath):
         oldpath = self._zk_path(oldpath)
         newpath = self._zk_path(newpath)
@@ -243,16 +215,6 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
         except NotEmptyError as e:
             raise FuseOSError(ENOTEMPTY) from e
-
-    def setxattr(self, path, name, value, options, position=0):
-        path = self._zk_path(path)
-        try:
-            meta = self._get_meta(path)
-            attrs = meta.setdefault('attrs', {})
-            attrs[name] = value
-            self.zk.set(path, msgpack.dumps(meta))
-        except NoNodeError as e:
-            raise FuseOSError(ENOENT) from e
 
     def statfs(self, path):
         # TODO: get this fs metadata from Zookeeper too?
