@@ -312,7 +312,7 @@ class DistFS(LoggingMixIn, Operations):
         return len(data)
 
 
-if __name__ == '__main__':
+def main():
     from sys import argv, exit
     import logging
     if len(argv) != 3:
@@ -324,5 +324,7 @@ if __name__ == '__main__':
     fuse = FUSE(distfs, argv[2], foreground=True)
     print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
 
+if __name__ == '__main__':
+    main()
 
 # vim: sw=4 ts=4 expandtab
