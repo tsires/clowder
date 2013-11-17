@@ -319,8 +319,7 @@ if __name__ == '__main__':
         print('usage: %s <root_name> <mountpoint>' % argv[0])
         exit(1)
 
-    logging.getLogger('fuse.log-mixin').setLevel(logging.DEBUG)
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG)
     distfs = DistFS(fs_root=argv[1])
     fuse = FUSE(distfs, argv[2], foreground=True)
     print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
