@@ -30,21 +30,15 @@ class DistFS(LoggingMixIn, Operations):
 
     FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
 
-    def __init__(self, fs_root, zk_hosts=None):
+    def __init__(self, zk, fs_root):
         self._meta_cache = {}
         self._children_cache = {}
         self._cache_tries = 0
         self._cache_misses = 0
-        if zk_hosts is None:
-            zk_hosts = [('127.0.0.1', '2181')]
-        hosts = ','.join(':'.join(host) for host in zk_hosts) 
-        self.zk = KazooClient(hosts=hosts)
+        self.zk = zk
         self.fs_root = fs_root
         # Internal FD counter
         self.fd = 0
-        # Startup
-        self.zk.start()
-        self.bootstrap()
 
     def bootstrap(self):
         path = self._zk_path('/')
@@ -279,8 +273,18 @@ def main(argv):
         print('usage: %s <root_name> <mountpoint>' % argv[0])
         return 1
 
-    distfs = DistFS(fs_root=argv[1])
-    fuse = FUSE(distfs, argv[2], foreground=True)
+    # Zookeeper
+    zk_hosts = [('127.0.0.1', '2181')]
+    hosts = ','.join(':'.join(host) for host in zk_hosts) 
+    zk = KazooClient(hosts=hosts)
+    zk.start()
+
+    # DistFS
+    distfs = DistFS(zk=zk, fs_root=argv[1])
+    distfs.bootstrap()
+
+    fuse = FUSE(distfs, argv[2], foreground=True, nothreads=True)
+    zk.stop()
     print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
     return 0
 
