@@ -8,16 +8,11 @@ Usage: ./distfs.py <root_name> <mountpoint>
 
 from __future__ import with_statement, division, print_function, absolute_import, unicode_literals
 
+import logging
 import posixpath
 from errno import EEXIST, ENOENT, ENOTEMPTY
 from stat import S_IFDIR, S_IFLNK, S_IFREG
-
 from time import time
-
-try:
-    from time import monotonic
-except ImportError:
-    from time import time as monotonic
 
 import msgpack
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
@@ -27,24 +22,62 @@ from kazoo.protocol.states import EventType
 
 from chunk.client import DummyChunkClient
 
+class File(dict):
+    def __init__(self, data, znode):
+        super().__init__(msgpack.loads(data, encoding='utf-8'))
+        self._znode = znode
+
+    def dumps(self):
+        return msgpack.dumps(self, encoding='utf-8')
+
+class Cache(object):
+    __log = logging.getLogger('distfs.cache')
+    def __init__(self, get):
+        self._get = get
+        self._cache = {}
+        self._tries = 0
+        self._misses = 0
+
+    def get(self, path):
+        self._tries += 1
+        try:
+            return self._cache[path]
+        except KeyError:
+            self.__log.debug('Cache miss: %s', path)
+            self._misses += 1
+            o = self._get(path, self._expire)
+            self._cache[path] = o
+            return o
+
+    def stats(self):
+        return (self._tries - self._misses, self._misses)
+
+    def _expire(self, event):
+        path = event.path
+        self.__log.debug('Cache expire: %s', path)
+        del self._cache[path]
+
+
 class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
     FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
+    __log = logging.getLogger('distfs')
 
     def __init__(self, zk, chunk_client, fs_root):
-        self._meta_cache = {}
-        self._children_cache = {}
-        self._cache_tries = 0
-        self._cache_misses = 0
         self.zk = zk
         self.chunk_client = chunk_client
-        self.fs_root = fs_root
+        self.fs_root = posixpath.join(self.FILESYSTEMS, fs_root)
+        # Caches
+        self._meta_cache = Cache(get=lambda p, w: File(*zk.get(p, w)))
+        self._children_cache = Cache(get=zk.get_children)
+        # FIXME: placeholders until finished refactoring
+        self._get_meta = self._meta_cache.get
+        self._get_children = self._children_cache.get
         # Internal FD counter
         self.fd = 0
 
     def bootstrap(self):
-        path = self._zk_path('/')
         now = time()
         meta = dict(attrs=dict(
                 st_mode=(S_IFDIR | 0o755),
@@ -55,41 +88,20 @@ class DistFS(LoggingMixIn, Operations):
                 st_atime=now,
                 ))
         try:
-            self.zk.create(path, msgpack.dumps(meta), makepath=True)
+            self.zk.create(self.fs_root, msgpack.dumps(meta, encoding='utf-8'), makepath=True)
+            self.__log.info('Created root directory at %s', self.fs_root)
         except NodeExistsError as e:
-            pass
+            self.__log.info('Mounted existing root directory at %s', self.fs_root)
+
+    def destroy(self, path):
+        self.__log.debug("Metadata cache hits: %d; misses: %d", *(self._meta_cache.stats()))
+        self.__log.debug("Children cache hits: %d; misses: %d", *(self._children_cache.stats()))
 
     def _op_stub(self, op, *args):
-        print('[%13.3f] [STUB] %s: %r' % (monotonic(), op, args))
+        self.__log.debug('[STUB] %s: %r', op, args)
 
     def _zk_path(self, path):
-        return posixpath.join(self.FILESYSTEMS, self.fs_root, path.lstrip('/'))
-
-    def _get_meta(self, path):
-        self._cache_tries += 1
-        try:
-            return self._meta_cache[path]
-        except KeyError:
-            self._cache_misses += 1
-            meta = msgpack.loads(self.zk.get(path, watch=self._cache_expire)[0], encoding='utf-8')
-            self._meta_cache[path] = meta
-            return meta
-
-    def _get_children(self, path):
-        self._cache_tries += 1
-        try:
-            return self._children_cache[path]
-        except KeyError:
-            self._cache_misses += 1
-            children = self.zk.get_children(path, watch=self._cache_expire)
-            self._children_cache[path] = children
-            return children
-
-    def _cache_expire(self, event):
-        if event.type == EventType.CHILD:
-            del self._children_cache[event.path]
-        else:
-            del self._meta_cache[event.path]
+        return posixpath.join(self.fs_root, path.lstrip('/')).rstrip('/')
 
     def chmod(self, path, mode):
         path = self._zk_path(path)
@@ -291,7 +303,6 @@ def main(argv):
 
     fuse = FUSE(distfs, argv[2], foreground=True, nothreads=True)
     zk.stop()
-    print("Cache hits: %d; misses: %d" % (distfs._cache_tries - distfs._cache_misses, distfs._cache_misses))
     return 0
 
 if __name__ == '__main__':
