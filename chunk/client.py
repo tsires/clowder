@@ -76,7 +76,7 @@ class ChunkClient(object):
         else:
             # New length is longer
             keys[-1] = self.truncate(keys[-1], self.CHUNK_SIZE)
-            keys.extend([0]*(last_chunk-len(keys)))
+            keys.extend([b'0'*40]*(last_chunk-len(keys)))
             keys.append(self.truncate(0, last_chunk_length))
         return keys
 
