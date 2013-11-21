@@ -6,6 +6,7 @@ Project for CSCI 6450
 
 from __future__ import with_statement, division, print_function, absolute_import, unicode_literals
 
+import logging
 import posixpath
 import hashlib
 from .common import *
@@ -20,6 +21,8 @@ class ChunkClient(object):
     The key, 0, is a special case: it represents a completely zero-filled chunk.
 
     """
+    __log = logging.getLogger('distfs.chunk_client')
+
     def __init__(self, chunk_size=64*1024):
         self._chunk_size = chunk_size
 
@@ -40,6 +43,7 @@ class ChunkClient(object):
     # Mutate one chunk and return the key of the result
 
     def truncate(self, key, length):
+        self.__log.debug('truncate(key=%r, length=%r)', key, length)
         orig_data = self.get(key)
         if length > len(orig_data):
             return self.put(orig_data + bytes(length-len(orig_data)))
@@ -49,6 +53,7 @@ class ChunkClient(object):
             return key
 
     def write_into(self, key, data, offset=0):
+        self.__log.debug('write_into(key=%r, data=%r, offset=%r)', key, data, offset)
         orig_data = self.get(key)
         if offset <= len(orig_data):
             return self.put(b''.join([orig_data[:offset], data, orig_data[offset+len(data):]]))
@@ -58,6 +63,10 @@ class ChunkClient(object):
     # Mutate a sequence of chunks and return the modified sequence
 
     def truncate_chunks(self, keys, length):
+        self.__log.debug('truncate_chunks(keys=%r, length=%r)', keys, length)
+        if length == 0:
+            del keys[:]
+            return keys
         last_chunk, last_chunk_length = divmod(length-1, self.CHUNK_SIZE)
         last_chunk_length += 1
         if last_chunk < len(keys):
@@ -72,6 +81,9 @@ class ChunkClient(object):
         return keys
 
     def write_chunks(self, keys, data, offset=0):
+        self.__log.debug('write_chunks(keys=%r, data=%r, offset=%r)', keys, data, offset)
+        if len(data) == 0:
+            return keys
         first_chunk, first_offset = divmod(offset, self.CHUNK_SIZE)
         last_chunk, last_offset = divmod(offset+len(data)-1, self.CHUNK_SIZE)
         last_offset += 1
@@ -81,7 +93,10 @@ class ChunkClient(object):
             keys = self.truncate_chunks(keys, offset)
 
         fragments = [data[max(0, s):s+self.CHUNK_SIZE] for s in range(-first_offset,len(data),self.CHUNK_SIZE)]
-        keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
+        if first_offset == 0:
+            keys[first_chunk:first_chunk+1] = [self.put(fragments[0])]
+        else:
+            keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
         if last_chunk > first_chunk:
             # Whole chunks
             keys[first_chunk+1:last_chunk] = (self.put(f) for f in fragments[1:-1])
@@ -94,12 +109,13 @@ class ChunkClient(object):
 
         return keys
 
-    def get_chunks(self, keys, start=None, end=None):
+    def read_chunks(self, keys, start=None, end=None):
         """ Get and concatenate the chunk data for each key in keys.
 
         If given, start and/or end should be offsets in bytes.
 
         """
+        self.__log.debug('read_chunks(keys=%r, start=%r, end=%r)', keys, start, end)
         if start is None:
             start = 0
         if end is None:
@@ -120,10 +136,10 @@ class ChunkClient(object):
 
         # Slice out portions of the first and last chunks
         if first_chunk == last_chunk:
-            chunks[0] = chunks[first_offset:last_offset]
+            chunks[0] = chunks[0][first_offset:last_offset]
         else:
-            chunks[0] = chunks[first_offset:]
-            chunks[-1] = chunks[:last_offset]
+            chunks[0] = chunks[0][first_offset:]
+            chunks[-1] = chunks[-1][:last_offset]
 
         return b''.join(chunks)
 
@@ -136,8 +152,8 @@ class LocalChunkClient(ChunkClient):
         self.cache_path = cache_path
         self.chunks = {}
         self._zero_chunk = bytes(self.CHUNK_SIZE)
-        self._zero_chunk_key = int(hashlib.sha1(self.ZERO_CHUNK).hexdigest(), 16)
-        self.chunks[0] = self.chunks[self._zero_chunk_key] = self._zero_chunk
+        self._zero_chunk_key = hashlib.sha1(self.ZERO_CHUNK).hexdigest()
+        self.chunks[b'0'*40] = self.chunks[self._zero_chunk_key] = self._zero_chunk
 
     @property
     def ZERO_CHUNK(self):
@@ -149,22 +165,21 @@ class LocalChunkClient(ChunkClient):
 
     def put(self, data):
         """ Store chunk data, returning its key. """
-        file_name = hashlib.sha1(data).hexdigest()
-        key = int(fname, 16)
+        key = hashlib.sha1(data).hexdigest()
         if key == self.ZERO_CHUNK_KEY:
             # No need to store
-            return 0
+            return b'0'*40
         self.chunks[key] = data
-        with open(posixpath.join(self.cache_path, file_name), mode='wb') as f:
+        with open(posixpath.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
-        return int(key, 16)
+        return key
 
     def get(self, key):
         """ Get the chunk data for the given numeric key. """
         try:
             return self.chunks[key]
         except KeyError:
-            with open(posixpath.join(self.cache_path, '%040x' % (key,)), mode='rb') as f:
+            with open(posixpath.join(self.cache_path, key), mode='rb') as f:
                 data = f.read()
             self.chunks[key] = data
             return data

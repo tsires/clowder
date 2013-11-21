@@ -192,11 +192,10 @@ class DistFS(LoggingMixIn, Operations):
     def read(self, path, size, offset, fh):
         path = self._zk_path(path)
         try:
-            self._get_meta(path)
+            meta = self._get_meta(path)
+            return self.chunk_client.read_chunks(meta['chunks'], offset, offset+size)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
-        # FIXME: replace stub with actual implementation
-        return b''
 
     def readdir(self, path, fh):
         # TODO: include stat objects?
@@ -281,7 +280,6 @@ class DistFS(LoggingMixIn, Operations):
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
-        # FIXME: replace stub with actual implementation
 
     def unlink(self, path):
         path = self._zk_path(path)
@@ -306,10 +304,13 @@ class DistFS(LoggingMixIn, Operations):
     def write(self, path, data, offset, fh):
         path = self._zk_path(path)
         try:
-            self._get_meta(path)
+            meta = self._get_meta(path)
+            if offset+len(data) > meta['attrs']['st_size']:
+                meta['attrs'].update(st_size=offset+len(data))
+            meta['chunks'] = self.chunk_client.write_chunks(meta['chunks'], data, offset)
+            self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
-        # FIXME: replace stub with actual implementation
         return len(data)
 
 
