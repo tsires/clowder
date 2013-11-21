@@ -76,8 +76,8 @@ class ChunkClient(object):
         else:
             # New length is longer
             keys[-1] = self.truncate(keys[-1], self.CHUNK_SIZE)
-            keys.extend([b'0'*40]*(last_chunk-len(keys)))
-            keys.append(self.truncate(0, last_chunk_length))
+            keys.extend(['0'*40]*(last_chunk-len(keys)))
+            keys.append(self.truncate('0'*40, last_chunk_length))
         return keys
 
     def write_chunks(self, keys, data, offset=0):
@@ -153,7 +153,7 @@ class LocalChunkClient(ChunkClient):
         self.chunks = {}
         self._zero_chunk = bytes(self.CHUNK_SIZE)
         self._zero_chunk_key = hashlib.sha1(self.ZERO_CHUNK).hexdigest()
-        self.chunks[b'0'*40] = self.chunks[self._zero_chunk_key] = self._zero_chunk
+        self.chunks['0'*40] = self.chunks[self._zero_chunk_key] = self._zero_chunk
 
     @property
     def ZERO_CHUNK(self):
@@ -168,7 +168,7 @@ class LocalChunkClient(ChunkClient):
         key = hashlib.sha1(data).hexdigest()
         if key == self.ZERO_CHUNK_KEY:
             # No need to store
-            return b'0'*40
+            return '0'*40
         self.chunks[key] = data
         with open(posixpath.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
@@ -179,10 +179,13 @@ class LocalChunkClient(ChunkClient):
         try:
             return self.chunks[key]
         except KeyError:
-            with open(posixpath.join(self.cache_path, key), mode='rb') as f:
-                data = f.read()
-            self.chunks[key] = data
-            return data
+            try:
+                with open(posixpath.join(self.cache_path, key), mode='rb') as f:
+                    data = f.read()
+                self.chunks[key] = data
+                return data
+            except FileNotFoundError as e:
+                raise ChunkNotFoundError(key) from e
 
 
 
