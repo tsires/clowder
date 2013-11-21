@@ -20,7 +20,7 @@ from kazoo.client import KazooClient
 from kazoo.exceptions import NodeExistsError, NoNodeError, NotEmptyError, RuntimeInconsistency, RolledBackError
 from kazoo.protocol.states import EventType
 
-from chunk.client import DummyChunkClient
+from chunk.client import LocalChunkClient
 
 class File(dict):
     def __init__(self, data, znode=None):
@@ -135,7 +135,7 @@ class DistFS(LoggingMixIn, Operations):
     def create(self, path, mode):
         path = self._zk_path(path)
         now = time()
-        new_meta = File(dict(data=[],attrs=dict(
+        new_meta = File(dict(chunks=[],attrs=dict(
                 st_mode=(S_IFREG | mode),
                 st_nlink=1,
                 st_size=0,
@@ -275,7 +275,10 @@ class DistFS(LoggingMixIn, Operations):
     def truncate(self, path, length, fh=None):
         path = self._zk_path(path)
         try:
-            self._get_meta(path)
+            meta = self._get_meta(path)
+            meta['attrs'].update(st_size=length)
+            meta['chunks'] = self.chunk_client.truncate_chunks(meta['chunks'], length)
+            self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         # FIXME: replace stub with actual implementation
@@ -322,7 +325,7 @@ def main(argv):
     zk.start()
 
     # ChunkClient
-    cc = DummyChunkClient('/tmp/chunkcache')
+    cc = LocalChunkClient('/tmp/chunkcache')
 
     # DistFS
     distfs = DistFS(zk=zk, chunk_client=cc, fs_root=argv[1])
