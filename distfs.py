@@ -314,11 +314,7 @@ class DistFS(LoggingMixIn, Operations):
         return len(data)
 
 
-def main(argv):
-    if len(argv) != 3:
-        print('usage: %s <root_name> <mountpoint>' % argv[0])
-        return 1
-
+def main(args):
     # Zookeeper
     zk_hosts = [('127.0.0.1', '2181')]
     hosts = ','.join(':'.join(host) for host in zk_hosts) 
@@ -329,17 +325,34 @@ def main(argv):
     cc = LocalChunkClient('/tmp/chunkcache')
 
     # DistFS
-    distfs = DistFS(zk=zk, chunk_client=cc, fs_root=argv[1])
+    distfs = DistFS(zk=zk, chunk_client=cc, fs_root=args.source)
     distfs.bootstrap()
 
-    fuse = FUSE(distfs, argv[2], foreground=True, nothreads=True)
+    fuse = FUSE(distfs, args.directory, foreground=args.foreground)
     zk.stop()
     return 0
 
 if __name__ == '__main__':
-    from sys import argv, exit
+    from sys import exit
     import logging
-    logging.basicConfig(level=logging.DEBUG)
-    exit(main(argv))
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Mount a Clowder filesystem tree.')
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-q', '--quiet', action='count')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-f', '--foreground', action='store_true')
+    group.add_argument('-b', '--background', action='store_false')
+    parser.add_argument('source')
+    parser.add_argument('directory')
+    parser.set_defaults(foreground=True, verbose=0, quiet=0)
+
+    args = parser.parse_args()
+
+    verbosity = args.verbose - args.quiet
+    log_level = logging.WARN - verbosity*10
+
+    logging.basicConfig(level=log_level)
+    exit(main(args))
 
 # vim: sw=4 ts=4 expandtab
