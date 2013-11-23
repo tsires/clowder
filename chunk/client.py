@@ -30,7 +30,7 @@ class ChunkClient(object):
     """
     __log = logging.getLogger('distfs.chunk_client')
 
-    def __init__(self, chunk_size=64*1024):
+    def __init__(self, chunk_size=4*1024):
         self._chunk_size = chunk_size
 
     @property
