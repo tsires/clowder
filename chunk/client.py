@@ -8,8 +8,15 @@ from __future__ import with_statement, division, print_function, absolute_import
 
 import logging
 import posixpath
-import hashlib
+
+import mmh3
+
 from .common import *
+
+def chunk_hash(data):
+    return '%016x%016x' % mmh3.hash64(data)
+
+ZERO = ''
 
 class ChunkClient(object):
     """Abstract chunk client. Provides some high-level convenience methods.
@@ -67,17 +74,20 @@ class ChunkClient(object):
         if length == 0:
             del keys[:]
             return keys
-        last_chunk, last_chunk_length = divmod(length-1, self.CHUNK_SIZE)
-        last_chunk_length += 1
+        last_chunk, last_chunk_length = divmod(length, self.CHUNK_SIZE)
+        if last_chunk_length == 0:
+            last_chunk -= 1
         if last_chunk < len(keys):
-            # New length is shorter
-            keys[last_chunk] = self.truncate(keys[last_chunk], last_chunk_length)
+            # New length is shorter or same number of chunks
+            if last_chunk_length > 0:
+                keys[last_chunk] = self.truncate(keys[last_chunk], last_chunk_length)
             del keys[last_chunk+1:]
         else:
             # New length is longer
             keys[-1] = self.truncate(keys[-1], self.CHUNK_SIZE)
-            keys.extend(['0'*40]*(last_chunk-len(keys)))
-            keys.append(self.truncate('0'*40, last_chunk_length))
+            keys.extend([ZERO]*(last_chunk-len(keys)))
+            if last_chunk_length > 0:
+                keys.append(self.put(bytes(last_chunk_length)))
         return keys
 
     def write_chunks(self, keys, data, offset=0):
@@ -93,12 +103,21 @@ class ChunkClient(object):
             keys = self.truncate_chunks(keys, offset)
 
         fragments = [data[max(0, s):s+self.CHUNK_SIZE] for s in range(-first_offset,len(data),self.CHUNK_SIZE)]
-        if first_offset == 0:
-            keys[first_chunk:first_chunk+1] = [self.put(fragments[0])]
+        if last_chunk == first_chunk:
+            # Write one chunk
+            if len(keys) == first_chunk:
+                keys.append(self.put(fragments[0]))
+            elif first_offset == 0 and last_offset == self.CHUNK_SIZE:
+                keys[first_chunk] = self.put(fragments[0])
+            else:
+                keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
         else:
-            keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
-        if last_chunk > first_chunk:
-            # Whole chunks
+            # Write first (possibly partial) chunk
+            if first_offset == 0:
+                keys[first_chunk:first_chunk+1] = [self.put(fragments[0])]
+            else:
+                keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
+            # Write whole chunks
             keys[first_chunk+1:last_chunk] = (self.put(f) for f in fragments[1:-1])
             if len(keys) > last_chunk:
                 # Write last partial chunk within existing chunk
@@ -151,24 +170,11 @@ class LocalChunkClient(ChunkClient):
         super().__init__(**kwargs)
         self.cache_path = cache_path
         self.chunks = {}
-        self._zero_chunk = bytes(self.CHUNK_SIZE)
-        self._zero_chunk_key = hashlib.sha1(self.ZERO_CHUNK).hexdigest()
-        self.chunks['0'*40] = self.chunks[self._zero_chunk_key] = self._zero_chunk
-
-    @property
-    def ZERO_CHUNK(self):
-        return self._zero_chunk
-
-    @property
-    def ZERO_CHUNK_KEY(self):
-        return self._zero_chunk_key
+        self.chunks[ZERO] = bytes(self.CHUNK_SIZE)
 
     def put(self, data):
         """ Store chunk data, returning its key. """
-        key = hashlib.sha1(data).hexdigest()
-        if key == self.ZERO_CHUNK_KEY:
-            # No need to store
-            return '0'*40
+        key = chunk_hash(data)
         self.chunks[key] = data
         with open(posixpath.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
