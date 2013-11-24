@@ -353,6 +353,7 @@ if __name__ == '__main__':
     log_level = logging.WARN - verbosity*10
 
     logging.basicConfig(level=log_level)
+    logging.getLogger('kazoo.client').setLevel(log_level + 20)
     exit(main(args))
 
 # vim: sw=4 ts=4 expandtab
