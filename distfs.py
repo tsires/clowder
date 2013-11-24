@@ -63,6 +63,26 @@ class Cache(object):
         del self._cache[path]
 
 
+class BufferedWrite(object):
+    def __init__(self, path, fh):
+        self._path = path
+        self._fh = fh
+        self._writes = []
+
+    def write(self, data, offset):
+        if len(self._writes) and self._writes[-1][1] == offset:
+            self._writes[-1][1]+=len(data)
+            self._writes[-1][2].append(data)
+        else:
+            self._writes.append([offset, offset+len(data), [data]])
+        return len(data)
+
+    def flush(self, func):
+        for w in self._writes:
+            func(self._path, b''.join(w[2]), w[0], self._fh)
+        self._writes = []
+        return 0
+
 class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
@@ -81,6 +101,7 @@ class DistFS(LoggingMixIn, Operations):
         self._get_meta = self._meta_cache.get
         self._get_children = self._children_cache.get
         # Internal FD counter
+        self._open_files = {}
         self.fd = 0
 
     def bootstrap(self):
@@ -150,6 +171,7 @@ class DistFS(LoggingMixIn, Operations):
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
         self.fd += 1
+        self._open_files[self.fd] = BufferedWrite(path, self.fd)
         return self.fd
 
     def getattr(self, path, fh=None):
@@ -186,8 +208,14 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def open(self, path, flags):
+        path = self._zk_path(path)
         self.fd += 1
+        self._open_files[self.fd] = BufferedWrite(path, self.fd)
         return self.fd
+
+    def release(self, path, fh):
+        del self._open_files[fh]
+        return 0
 
     def read(self, path, size, offset, fh):
         path = self._zk_path(path)
@@ -302,7 +330,14 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def write(self, path, data, offset, fh):
-        path = self._zk_path(path)
+        return self._open_files[fh].write(data, offset)
+
+    def flush(self, path, fh):
+        return self._open_files[fh].flush(self._write)
+
+    def _write(self, path, data, offset, fh):
+        self.__log.debug('Applying buffered write: %s %r(%d) %d, %d', path, data[:10], len(data), offset, fh)
+        # Internal write
         try:
             meta = self._get_meta(path)
             if offset+len(data) > meta['attrs']['st_size']:
