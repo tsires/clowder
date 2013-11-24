@@ -8,13 +8,14 @@ from __future__ import with_statement, division, print_function, absolute_import
 
 import logging
 import posixpath
+from base64 import b16encode
 
 import mmh3
 
 from .common import *
 
 def chunk_hash(data):
-    return '%016x%016x' % mmh3.hash64(data)
+    return b16encode(mmh3.hash_bytes(data)).decode('ascii')
 
 ZERO = ''
 
