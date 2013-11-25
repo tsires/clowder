@@ -8,6 +8,7 @@ Usage: ./distfs.py <root_name> <mountpoint>
 
 from __future__ import with_statement, division, print_function, absolute_import, unicode_literals
 
+import os
 import logging
 import posixpath
 from errno import EEXIST, ENOENT, ENOTEMPTY
@@ -109,6 +110,9 @@ class DistFS(LoggingMixIn, Operations):
         # Internal FD counter
         self._open_files = {}
         self.fd = 0
+        # UID and GID
+        self.uid = os.getuid()
+        self.gid = os.getgid()
 
     def bootstrap(self):
         now = time()
@@ -186,7 +190,7 @@ class DistFS(LoggingMixIn, Operations):
         # TODO: get some info from the znode too
         path = self._zk_path(path)
         try:
-            return self._get_meta(path)['attrs']
+            return dict(self._get_meta(path)['attrs'], st_uid=self.uid, st_gid=self.gid)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
 
