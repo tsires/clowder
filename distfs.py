@@ -23,9 +23,11 @@ from kazoo.protocol.states import EventType
 from chunk.client import LocalChunkClient
 
 class File(dict):
+    __log = logging.getLogger('distfs.cache')
     def __init__(self, data, znode=None):
         super().__init__(data)
         self._znode = znode
+        self._dirty = False
 
     def dumps(self):
         return msgpack.dumps(self, encoding='utf-8')
@@ -33,6 +35,10 @@ class File(dict):
     @classmethod
     def loads(cls, data):
         return cls(msgpack.loads(data[0], encoding='utf-8'), data[1])
+
+    def __del__(self):
+        if self._dirty:
+            self.__log.warn('Wiping out modified data')
 
 
 class Cache(object):
@@ -139,6 +145,7 @@ class DistFS(LoggingMixIn, Operations):
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_mode=mode)
+            meta._dirty = False
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
@@ -149,6 +156,7 @@ class DistFS(LoggingMixIn, Operations):
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_uid=uid, st_gid=gid)
+            meta._dirty = False
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
@@ -218,6 +226,7 @@ class DistFS(LoggingMixIn, Operations):
         return 0
 
     def read(self, path, size, offset, fh):
+        self._open_files[fh].flush(self._write)
         path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
@@ -300,11 +309,14 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def truncate(self, path, length, fh=None):
+        if fh is not None:
+            self._open_files[fh].flush(self._write)
         path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_size=length)
             meta['chunks'] = self.chunk_client.truncate_chunks(meta['chunks'], length)
+            meta._dirty = False
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
@@ -325,11 +337,20 @@ class DistFS(LoggingMixIn, Operations):
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_atime=atime, st_mtime=mtime)
+            meta._dirty = False
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
 
     def write(self, path, data, offset, fh):
+        path = self._zk_path(path)
+        try:
+            meta = self._get_meta(path)
+            if offset+len(data) > meta['attrs']['st_size']:
+                meta['attrs'].update(st_size=offset+len(data))
+                meta._dirty = True
+        except NoNodeError as e:
+            raise FuseOSError(ENOENT) from e
         return self._open_files[fh].write(data, offset)
 
     def flush(self, path, fh):
@@ -343,6 +364,7 @@ class DistFS(LoggingMixIn, Operations):
             if offset+len(data) > meta['attrs']['st_size']:
                 meta['attrs'].update(st_size=offset+len(data))
             meta['chunks'] = self.chunk_client.write_chunks(meta['chunks'], data, offset)
+            meta._dirty = False
             self.zk.set(path, meta.dumps())
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
