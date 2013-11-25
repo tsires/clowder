@@ -11,7 +11,7 @@ from __future__ import with_statement, division, print_function, absolute_import
 import os
 import logging
 import posixpath
-from errno import EEXIST, ENOENT, ENOTEMPTY
+from errno import EEXIST, ENOENT, ENOTEMPTY, EPERM
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
 
@@ -155,15 +155,8 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def chown(self, path, uid, gid):
-        # FIXME: maybe this should be a single-user fs?
-        path = self._zk_path(path)
-        try:
-            meta = self._get_meta(path)
-            meta['attrs'].update(st_uid=uid, st_gid=gid)
-            meta._dirty = False
-            self.zk.set(path, meta.dumps())
-        except NoNodeError as e:
-            raise FuseOSError(ENOENT) from e
+        # FIXME: Should this be EACCESS?
+        raise FuseOSError(EPERM)
 
     def create(self, path, mode):
         path = self._zk_path(path)
