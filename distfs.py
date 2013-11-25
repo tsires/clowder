@@ -93,7 +93,7 @@ class DistFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
     FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
-    CHUNK_SIZE = 4*1024
+    CHUNK_SIZE = 64*1024
     __log = logging.getLogger('distfs')
 
     def __init__(self, zk, chunk_client, fs_root):
