@@ -51,83 +51,121 @@ class ChunkClient(object):
     # Mutate one chunk and return the key of the result
 
     def truncate(self, key, length):
+        'Mutate and return a list of up to one chunk by truncating it'
         self.__log.debug('truncate(key=%r, length=%r)', key, length)
-        orig_data = self.get(key)
+
+        if length == 0:
+            # No chunk here
+            return []
+        elif length == self.CHUNK_SIZE and len(key) == 0:
+            # Optimize for this edge case
+            # NOTE: this isn't strictly necessary, but avoids hashing a bunch of zeros again
+            return [ZERO]
+
+        try:
+            orig_data = self.get(key[0])
+        except IndexError:
+            orig_data = b''
+
         if length > len(orig_data):
-            return self.put(orig_data + bytes(length-len(orig_data)))
+            # Zero-pad this data
+            return [self.put(b''.join([orig_data, bytes(length-len(orig_data))]))]
         elif length < len(orig_data):
-            return self.put(orig_data[:length])
+            # Shorten this data
+            return [self.put(orig_data[:length])]
         else:
+            # No change in length
+            # NOTE: this is fine even if len(key) was zero
             return key
 
+
     def write_into(self, key, data, offset=0):
-        self.__log.debug('write_into(key=%r, data=%r, offset=%r)', key, data, offset)
-        orig_data = self.get(key)
+        'Mutate and return a list of up to one chunk by writing data into it'
+        self.__log.debug('write_into(key=%r, data=%r(%d), offset=%r)', key, data[:16], len(data), offset)
+
+        if len(data) == 0:
+            # No change to data
+            # NOTE: Not sure if this happens, but avoids some edge cases
+            return key
+        elif len(data) == self.CHUNK_SIZE:
+            # Completely replacing data
+            return [self.put(data)]
+
+        try:
+            orig_data = self.get(key[0])
+        except IndexError:
+            orig_data = b''
+
         if offset <= len(orig_data):
-            return self.put(b''.join([orig_data[:offset], data, orig_data[offset+len(data):]]))
+            return [self.put(b''.join([orig_data[:offset], data, orig_data[offset+len(data):]]))]
         else:
-            return self.put(b''.join([orig_data, bytes(offset-len(orig_data)), data]))
+            # NOTE: This can still happen because truncate_chunks only
+            # gets called if truncate is necessary at the chunk level
+            return [self.put(b''.join([orig_data, bytes(offset-len(orig_data)), data]))]
+
 
     # Mutate a sequence of chunks and return the modified sequence
 
     def truncate_chunks(self, keys, length):
+        'Mutate and return a list of chunks by truncating them'
         self.__log.debug('truncate_chunks(keys=%r, length=%r)', keys, length)
+
         if length == 0:
+            # Remove all chunks
             del keys[:]
             return keys
+
+        # Determine the last partial chunk
         last_chunk, last_chunk_length = divmod(length, self.CHUNK_SIZE)
-        if last_chunk_length == 0:
-            last_chunk -= 1
-        if last_chunk < len(keys):
-            # New length is shorter or same number of chunks
-            if last_chunk_length > 0:
-                keys[last_chunk] = self.truncate(keys[last_chunk], last_chunk_length)
-            del keys[last_chunk+1:]
-        else:
-            # New length is longer
-            keys[-1] = self.truncate(keys[-1], self.CHUNK_SIZE)
+
+        # Extend to new length if longer
+        if last_chunk >= max(1, len(keys)):
+            # Extend the current last chunk if necessary
+            keys[-1:] = self.truncate(keys[-1:], self.CHUNK_SIZE)
+            # Sparse fill complete chunks, if any
             keys.extend([ZERO]*(last_chunk-len(keys)))
-            if last_chunk_length > 0:
-                keys.append(self.put(bytes(last_chunk_length)))
+
+        # Truncate the new last chunk
+        keys[last_chunk:] = self.truncate(keys[last_chunk:last_chunk+1], last_chunk_length)
+
         return keys
 
+
     def write_chunks(self, keys, data, offset=0):
-        self.__log.debug('write_chunks(keys=%r, data=%r, offset=%r)', keys, data, offset)
-        if len(data) == 0:
-            return keys
+        'Mutate and return a list of chunks by writing data into them'
+        self.__log.debug('write_chunks(keys=%r, data=%r(%d), offset=%r)', keys, data[:16], len(data), offset)
+
+        # Determine the first chunk and last chunks to be modified
+        # as well as the offsets within those chunks
+        # NOTE: len(data) == 0 --> first_chunk == last_chunk-1
         first_chunk, first_offset = divmod(offset, self.CHUNK_SIZE)
         last_chunk, last_offset = divmod(offset+len(data)-1, self.CHUNK_SIZE)
         last_offset += 1
 
-        if len(keys) <= last_chunk:
+        # If offset > file length, will need to truncate to offset
+        # We don't know actual file length in bytes, but we do know the number of chunks
+        # NOTE: len(data) == 0 --> first_chunk == last_chunk-1; hence, we use the greater of the two
+        if len(keys) <= max(first_chunk, last_chunk):
             # Write extends beyond current length; truncate to start and append
             keys = self.truncate_chunks(keys, offset)
 
+        # NOTE: Not sure if this ever actually happens, but handling it lets us safely ignore the edge case
+        if len(data) == 0:
+            return keys
+
+        # Split data into fragments to be written into each chunk
         fragments = [data[max(0, s):s+self.CHUNK_SIZE] for s in range(-first_offset,len(data),self.CHUNK_SIZE)]
-        if last_chunk == first_chunk:
-            # Write one chunk
-            if len(keys) == first_chunk:
-                keys.append(self.put(fragments[0]))
-            elif first_offset == 0 and last_offset == self.CHUNK_SIZE:
-                keys[first_chunk] = self.put(fragments[0])
-            else:
-                keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
-        else:
-            # Write first (possibly partial) chunk
-            if first_offset == 0:
-                keys[first_chunk:first_chunk+1] = [self.put(fragments[0])]
-            else:
-                keys[first_chunk] = self.write_into(keys[first_chunk], fragments[0], first_offset)
+
+        # Write first (possibly partial) chunk
+        keys[first_chunk:first_chunk+1] = self.write_into(keys[first_chunk:first_chunk+1], fragments[0], first_offset)
+        if last_chunk > first_chunk:
             # Write whole chunks
             keys[first_chunk+1:last_chunk] = (self.put(f) for f in fragments[1:-1])
-            if len(keys) > last_chunk:
-                # Write last partial chunk within existing chunk
-                keys[last_chunk] = self.write_into(keys[last_chunk], fragments[-1])
-            else:
-                # Write extends beyond existing chunks
-                keys[last_chunk:] = [self.put(fragments[-1])]
+            # Write last (possibly partial) chunk
+            keys[last_chunk:last_chunk+1] = self.write_into(keys[last_chunk:last_chunk+1], fragments[-1])
 
         return keys
+
 
     def read_chunks(self, keys, start=None, end=None):
         """ Get and concatenate the chunk data for each key in keys.
@@ -148,17 +186,15 @@ class ChunkClient(object):
             return b''
         elif len(keys) <= last_chunk:
             last_chunk = len(keys)-1
-            last_offset = None
+            last_offset = self.CHUNK_SIZE
 
-        chunks = []
         # Start with whole chunks
-        chunks.extend(self.get(k) for k in keys[first_chunk:last_chunk+1])
+        chunks = list(self.get(k) for k in keys[first_chunk:last_chunk+1])
 
         # Slice out portions of the first and last chunks
-        if first_chunk == last_chunk:
-            chunks[0] = chunks[0][first_offset:last_offset]
-        else:
+        if first_offset > 0:
             chunks[0] = chunks[0][first_offset:]
+        if last_offset < self.CHUNK_SIZE:
             chunks[-1] = chunks[-1][:last_offset]
 
         return b''.join(chunks)
@@ -177,6 +213,7 @@ class LocalChunkClient(ChunkClient):
         """ Store chunk data, returning its key. """
         key = chunk_hash(data)
         self.chunks[key] = data
+        # NOTE: could probably skip this step if the file exists
         with open(posixpath.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
         return key
