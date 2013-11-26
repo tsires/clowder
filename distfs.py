@@ -11,8 +11,9 @@ from __future__ import with_statement, division, print_function, absolute_import
 import os
 import logging
 import posixpath
+from functools import reduce
 from errno import EEXIST, ENOENT, ENOTEMPTY, EPERM
-from stat import S_IFDIR, S_IFLNK, S_IFREG
+from stat import S_IFDIR, S_IFLNK, S_IFREG, S_ISDIR, S_ISREG
 from time import time
 
 import msgpack
@@ -367,6 +368,17 @@ class DistFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
         return len(data)
 
+    def _get_used_chunks(self, root=None):
+        if root is None:
+            root = self.fs_root
+        meta = self._get_meta(root)
+        if S_ISREG(meta['attrs']['st_mode']):
+            return set(meta['chunks'])
+        elif S_ISDIR(meta['attrs']['st_mode']):
+            children = (posixpath.join(root, child) for child in self._get_children(root))
+            return reduce(set.union, (self._get_used_chunks(root=path) for path in children))
+        else:
+            return set()
 
 def main(args):
     # Zookeeper
