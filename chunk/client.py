@@ -192,10 +192,10 @@ class ChunkClient(object):
         chunks = list(self.get(k) for k in keys[first_chunk:last_chunk+1])
 
         # Slice out portions of the first and last chunks
-        if first_offset > 0:
-            chunks[0] = chunks[0][first_offset:]
         if last_offset < self.CHUNK_SIZE:
             chunks[-1] = chunks[-1][:last_offset]
+        if first_offset > 0:
+            chunks[0] = chunks[0][first_offset:]
 
         return b''.join(chunks)
 
