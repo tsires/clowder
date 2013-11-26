@@ -1,0 +1,5 @@
+pyzmq
+kazoo
+msgpack-python
+pymongo
+fusepy
