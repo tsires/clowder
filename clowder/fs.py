@@ -15,6 +15,7 @@ from functools import reduce
 from errno import EEXIST, ENOENT, ENOTEMPTY, EPERM
 from stat import S_IFDIR, S_IFLNK, S_IFREG, S_ISDIR, S_ISREG
 from time import time
+import argparse
 
 import msgpack
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
@@ -22,7 +23,9 @@ from kazoo.client import KazooClient
 from kazoo.exceptions import NodeExistsError, NoNodeError, NotEmptyError, RuntimeInconsistency, RolledBackError
 from kazoo.protocol.states import EventType
 
-from chunk.client import LocalChunkClient
+from .common import *
+from .exception import *
+from .chunkclient import LocalChunkClient
 
 class File(dict):
     __log = logging.getLogger('distfs.cache')
@@ -91,10 +94,10 @@ class BufferedWrite(object):
         self._writes = []
         return 0
 
-class DistFS(LoggingMixIn, Operations):
+class ClowderFS(LoggingMixIn, Operations):
     'Distributed filesystem. Queries Zookeeper for directory contents and metadata.'
 
-    FILESYSTEMS = posixpath.join('/', 'fs', 'trees')
+    FILESYSTEMS = FILESYSTEMS
     CHUNK_SIZE = 64*1024
     __log = logging.getLogger('distfs')
 
@@ -115,11 +118,12 @@ class DistFS(LoggingMixIn, Operations):
         self.uid = os.getuid()
         self.gid = os.getgid()
 
-    def bootstrap(self):
+    @classmethod
+    def mkfs(cls, zk, fs_root, chunk_size):
         now = time()
         root_meta = File(dict(
             fs=dict(
-                f_bsize=self.CHUNK_SIZE,
+                f_bsize=chunk_size,
                 ),
             attrs=dict(
                 st_mode=(S_IFDIR | 0o755),
@@ -130,10 +134,11 @@ class DistFS(LoggingMixIn, Operations):
                 st_atime=now,
                 )))
         try:
-            self.zk.create(self.fs_root, root_meta.dumps(), makepath=True)
-            self.__log.info('Created root directory at %s', self.fs_root)
+            zk.create(fs_root, root_meta.dumps(), makepath=True)
+            cls.__log.info('Created root directory at %s', self.fs_root)
         except NodeExistsError as e:
-            self.__log.info('Mounted existing root directory at %s', self.fs_root)
+            cls.__log.error('Filesystem already exists at %s', self.fs_root)
+            raise FSAlreadyExistsError from e
 
     def destroy(self, path):
         self.__log.debug("Metadata cache hits: %d; misses: %d", *(self._meta_cache.stats()))
@@ -380,46 +385,5 @@ class DistFS(LoggingMixIn, Operations):
         else:
             return set()
 
-def main(args):
-    # Zookeeper
-    zk_hosts = [('127.0.0.1', '2181')]
-    hosts = ','.join(':'.join(host) for host in zk_hosts) 
-    zk = KazooClient(hosts=hosts)
-    zk.start()
-
-    # ChunkClient
-    cc = LocalChunkClient('/tmp/chunkcache')
-
-    # DistFS
-    distfs = DistFS(zk=zk, chunk_client=cc, fs_root=args.source)
-    distfs.bootstrap()
-
-    fuse = FUSE(distfs, args.directory, foreground=args.foreground)
-    zk.stop()
-    return 0
-
-if __name__ == '__main__':
-    from sys import exit
-    import logging
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Mount a Clowder filesystem tree.')
-    parser.add_argument('-v', '--verbose', action='count')
-    parser.add_argument('-q', '--quiet', action='count')
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('-f', '--foreground', action='store_true')
-    group.add_argument('-b', '--background', action='store_false')
-    parser.add_argument('source')
-    parser.add_argument('directory')
-    parser.set_defaults(foreground=True, verbose=0, quiet=0)
-
-    args = parser.parse_args()
-
-    verbosity = args.verbose - args.quiet
-    log_level = logging.WARN - verbosity*10
-
-    logging.basicConfig(level=log_level)
-    logging.getLogger('kazoo.client').setLevel(log_level + 20)
-    exit(main(args))
 
 # vim: sw=4 ts=4 expandtab

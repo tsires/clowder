@@ -1,15 +1,15 @@
 from setuptools import setup
 
 setup(
-    name='6450-distfs',
+    name='clowder',
     version='0.1.0',
     author='Nick Kiermaier, Chad Ross, Tom Sires',
     author_email='nickthemagicman@live.com',
-    packages=['distfs','distfs.chunk','distfs.remotefs'],
+    packages=['clowder'],
     scripts=[],
-    url='http://pypi.python.org/pypi/tbd/',
+    url='https://gitlab.cs.uno.edu/tsires/distfs',
     license='LICENSE.txt',
-    description='Csci 6450 project-distributed filesystem',
+    description='ClowderFS: Distributed Filesystem project for CSCI 6450',
     long_description=open('docs/README.txt').read(),
     install_requires=[
         "pyzmq",
@@ -18,9 +18,11 @@ setup(
         "pymongo",
         "fusepy"
     ],
-     entry_points={
-        'console_scripts':
-            ['distfsMount = distfs.distfs:distfsMount']
+    entry_points={
+        'console_scripts':[
+		'mkfs.clowder' = 'clowder.cli:mkfs',
+		'mount.clowder' = 'clowder.cli:mount',
+		]
         }
 )
 
