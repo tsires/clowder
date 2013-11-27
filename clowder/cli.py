@@ -1,6 +1,7 @@
 __all__ = ['mkfs', 'mount']
 
 import argparse
+import logging
 
 from kazoo.client import KazooClient
 from fuse import FUSE
@@ -32,6 +33,13 @@ mkfs_parser.set_defaults(chunk_size=64*1024)
 def mount(args=None):
     args = mount_parser.parse_args(args)
 
+    # Log verbosity
+    verbosity = args.verbose - args.quiet
+    log_level = logging.WARN - verbosity*10
+
+    logging.basicConfig(level=log_level)
+    logging.getLogger('kazoo.client').setLevel(log_level + 20)
+
     # Zookeeper
     if len(args.servers):
         zk_hosts = ','.join(args.servers)
@@ -56,6 +64,13 @@ def mount(args=None):
 def mkfs(args=None):
     args = mkfs_parser.parse_args(args)
 
+    # Log verbosity
+    verbosity = args.verbose - args.quiet
+    log_level = logging.WARN - verbosity*10
+
+    logging.basicConfig(level=log_level)
+    logging.getLogger('kazoo.client').setLevel(log_level + 20)
+
     # Zookeeper
     if len(args.servers):
         zk_hosts = ','.join(args.servers)
@@ -71,12 +86,6 @@ def mkfs(args=None):
     # Cleanup
     zk.stop()
 
-def _main():
-    verbosity = args.verbose - args.quiet
-    log_level = logging.WARN - verbosity*10
-
-    logging.basicConfig(level=log_level)
-    logging.getLogger('kazoo.client').setLevel(log_level + 20)
 
 # vim: sw=4 ts=4 expandtab
 

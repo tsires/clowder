@@ -119,6 +119,7 @@ class ClowderFS(LoggingMixIn, Operations):
 
     @classmethod
     def mkfs(cls, zk, fs_root, chunk_size):
+        fs_root = posixpath.join(FILESYSTEMS, fs_root)
         now = time()
         root_meta = File(dict(
             fs=dict(
