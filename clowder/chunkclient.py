@@ -10,6 +10,8 @@ import os
 import logging
 import posixpath
 from base64 import b16encode
+import multiprocessing
+from itertools import zip_longest, chain
 
 import mmh3
 
@@ -55,6 +57,8 @@ class ChunkClient(object):
         'Mutate and return a list of up to one chunk by truncating it'
         self.__log.debug('truncate(key=%r, length=%r)', key, length)
 
+        key = key or []
+
         if length == 0:
             # No chunk here
             return []
@@ -83,6 +87,9 @@ class ChunkClient(object):
     def write_into(self, key, data, offset=0):
         'Mutate and return a list of up to one chunk by writing data into it'
         self.__log.debug('write_into(key=%r, data=%r(%d), offset=%r)', key, data[:16], len(data), offset)
+
+        key = key or []
+        offset = offset or 0
 
         if len(data) == 0:
             # No change to data
@@ -201,7 +208,93 @@ class ChunkClient(object):
         return b''.join(chunks)
 
 
-class LocalChunkClient(ChunkClient):
+class AsyncChunkClient(ChunkClient):
+    """The abstract chunk client with asynchronous methods.
+
+    Subclasses should implement the following:
+        put(data) -> key
+        get(key)  -> data
+
+    The key, 0, is a special case: it represents a completely zero-filled chunk.
+
+    """
+    __log = logging.getLogger('distfs.chunk_client')
+
+    def __init__(self, num_processes=4, **kwargs):
+        super().__init__(**kwargs)
+        self.num_processes = num_processes
+
+    # Convenience methods
+
+    # Mutate a sequence of chunks and return the modified sequence
+
+    def write_chunks(self, keys, data, offset=0):
+        'Mutate and return a list of chunks by writing data into them'
+        self.__log.debug('write_chunks(keys=%r, data=%r(%d), offset=%r)', keys, data[:16], len(data), offset)
+
+        # Determine the first chunk and last chunks to be modified
+        # as well as the offsets within those chunks
+        # NOTE: len(data) == 0 --> first_chunk == last_chunk-1
+        first_chunk, first_offset = divmod(offset, self.CHUNK_SIZE)
+        last_chunk, last_offset = divmod(offset+len(data)-1, self.CHUNK_SIZE)
+        last_offset += 1
+
+        # If offset > file length, will need to truncate to offset
+        # We don't know actual file length in bytes, but we do know the number of chunks
+        # NOTE: len(data) == 0 --> first_chunk == last_chunk-1; hence, we use the greater of the two
+        if len(keys) <= max(first_chunk, last_chunk):
+            # Write extends beyond current length; truncate to start and append
+            keys = self.truncate_chunks(keys, offset)
+
+        # NOTE: Not sure if this ever actually happens, but handling it lets us safely ignore the edge case
+        if len(data) == 0:
+            return keys
+
+        # Split data into fragments to be written into each chunk
+        fragments = (data[max(0, s):s+self.CHUNK_SIZE] for s in range(-first_offset,len(data),self.CHUNK_SIZE))
+
+        # Write all chunks
+        with multiprocessing.Pool(processes=self.num_processes) as pool:
+            keys[first_chunk:last_chunk+1] = chain.from_iterable(pool.starmap(self.write_into, zip_longest(([k] for k in keys[first_chunk:last_chunk+1]), fragments, [first_offset])))
+
+        return keys
+
+
+    def read_chunks(self, keys, start=None, end=None):
+        """ Get and concatenate the chunk data for each key in keys.
+
+        If given, start and/or end should be offsets in bytes.
+
+        """
+        self.__log.debug('read_chunks(keys=%r, start=%r, end=%r)', keys, start, end)
+        if start is None:
+            start = 0
+        if end is None:
+            end = len(keys) * self.CHUNK_SIZE
+        first_chunk, first_offset = divmod(start, self.CHUNK_SIZE)
+        last_chunk, last_offset = divmod(end-1, self.CHUNK_SIZE)
+        last_offset += 1
+
+        if len(keys) <= first_chunk:
+            return b''
+        elif len(keys) <= last_chunk:
+            last_chunk = len(keys)-1
+            last_offset = self.CHUNK_SIZE
+
+        # Start with whole chunks
+        with multiprocessing.Pool(processes=self.num_processes) as pool:
+            chunks = list(pool.map(self.get, keys[first_chunk:last_chunk+1]))
+
+        # Slice out portions of the first and last chunks
+        if last_offset < self.CHUNK_SIZE:
+            chunks[-1] = chunks[-1][:last_offset]
+        if first_offset > 0:
+            chunks[0] = chunks[0][first_offset:]
+
+        return b''.join(chunks)
+
+
+class LocalChunkClient(AsyncChunkClient):
     """ Simple, file-backed local chunk cache. """
 
     def __init__(self, cache_path, **kwargs):
@@ -236,8 +329,6 @@ class LocalChunkClient(ChunkClient):
         for key in (set(os.listdir(self.cache_path)) - keys):
             os.remove(posixpath.join(self.cache_path, key))
             del self.chunks[key]
-
-
 
 
 # vim: sw=4 ts=4 expandtab
