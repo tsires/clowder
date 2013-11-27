@@ -10,7 +10,7 @@ setup(
     url='https://gitlab.cs.uno.edu/tsires/distfs',
     license='LICENSE.txt',
     description='ClowderFS: Distributed Filesystem project for CSCI 6450',
-    long_description=open('docs/README.txt').read(),
+    long_description=open('README').read(),
     install_requires=[
         "pyzmq",
         "kazoo",
@@ -20,8 +20,8 @@ setup(
     ],
     entry_points={
         'console_scripts':[
-		'mkfs.clowder' = 'clowder.cli:mkfs',
-		'mount.clowder' = 'clowder.cli:mount',
+		'mkfs.clowder = clowder.cli:mkfs',
+		'mount.clowder = clowder.cli:mount',
 		]
         }
 )
