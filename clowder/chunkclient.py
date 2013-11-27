@@ -6,6 +6,7 @@ Project for CSCI 6450
 
 from __future__ import with_statement, division, print_function, absolute_import, unicode_literals
 
+import os
 import logging
 import posixpath
 from base64 import b16encode
@@ -230,6 +231,11 @@ class LocalChunkClient(ChunkClient):
                 return data
             except FileNotFoundError as e:
                 raise ChunkNotFoundError(key) from e
+
+    def garbage_collect(self, keys):
+        for key in (set(os.listdir(self.cache_path)) - keys):
+            os.remove(posixpath.join(self.cache_path, key))
+            del self.chunks[key]
 
 
 
