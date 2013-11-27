@@ -2,6 +2,9 @@ __all__ = ['mkfs', 'mount']
 
 import argparse
 
+from kazoo.client import KazooClient
+from fuse import FUSE
+
 from .fs import ClowderFS
 from .chunkclient import LocalChunkClient
 
@@ -10,7 +13,7 @@ base_parser = argparse.ArgumentParser(add_help=False)
 base_parser.add_argument('-v', '--verbose', action='count')
 base_parser.add_argument('-q', '--quiet', action='count')
 base_parser.add_argument('-s', '--server', action='append', dest='servers')
-base_parser.set_defaults(verbose=0, quiet=0)
+base_parser.set_defaults(verbose=0, quiet=0, servers=[])
 
 mount_parser = argparse.ArgumentParser(parents=[base_parser], description='Mount a Clowder filesystem tree.')
 group = mount_parser.add_mutually_exclusive_group()

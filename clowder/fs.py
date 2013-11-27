@@ -18,8 +18,7 @@ from time import time
 import argparse
 
 import msgpack
-from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
-from kazoo.client import KazooClient
+from fuse import FuseOSError, Operations, LoggingMixIn
 from kazoo.exceptions import NodeExistsError, NoNodeError, NotEmptyError, RuntimeInconsistency, RolledBackError
 from kazoo.protocol.states import EventType
 
@@ -135,10 +134,10 @@ class ClowderFS(LoggingMixIn, Operations):
                 )))
         try:
             zk.create(fs_root, root_meta.dumps(), makepath=True)
-            cls.__log.info('Created root directory at %s', self.fs_root)
+            cls.__log.info('Created root directory at %s', fs_root)
         except NodeExistsError as e:
-            cls.__log.error('Filesystem already exists at %s', self.fs_root)
-            raise FSAlreadyExistsError from e
+            cls.__log.error('Filesystem already exists at %s', fs_root)
+            raise FSAlreadyExistsError(fs_root) from e
 
     def destroy(self, path):
         self.__log.debug("Metadata cache hits: %d; misses: %d", *(self._meta_cache.stats()))

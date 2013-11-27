@@ -1,4 +1,4 @@
-__all__ = ['ChunkServerError', 'ChunkNotFoundError']
+__all__ = ['ClowderFSError', 'FSAlreadyExistsError', 'ChunkServerError', 'ChunkNotFoundError']
 
 class ClowderFSError(Exception):
     pass
