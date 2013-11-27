@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='clowder',
-    version='0.1.5',
+    version='0.1.6',
     author='Nick Kiermaier, Chad Ross, Tom Sires',
     author_email='nickthemagicman@live.com',
     packages=['clowder'],
@@ -16,6 +16,7 @@ setup(
         "kazoo",
         "msgpack-python",
         "fusepy",
+        "mmh3",
     ],
     dependency_links=[
         "git+https://github.com/tsires/fusepy.git#fusepy",
