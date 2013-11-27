@@ -257,7 +257,7 @@ class ClowderFS(LoggingMixIn, Operations):
         oldpath = self._zk_path(oldpath)
         newpath = self._zk_path(newpath)
         try:
-            meta = self._get_meta(path)
+            meta = self._get_meta(oldpath)
             trans = self.zk.transaction()
             trans.create(newpath, msgpack.dumps(meta))
             trans.delete(oldpath)
