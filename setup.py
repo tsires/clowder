@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='clowder',
-    version='0.1.6',
+    version='0.1.7',
     author='Nick Kiermaier, Chad Ross, Tom Sires',
     author_email='nickthemagicman@live.com',
     packages=['clowder'],
