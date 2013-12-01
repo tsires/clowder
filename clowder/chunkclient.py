@@ -10,13 +10,14 @@ import os
 import logging
 import posixpath
 from base64 import b16encode
+from uuid import uuid1
 
 import mmh3
 
 from .common import *
 
 def chunk_hash(data):
-    return b16encode(mmh3.hash_bytes(data)).decode('ascii')
+    return b16encode(mmh3.hash_bytes(uuid1().bytes)).decode('ascii')
 
 ZERO = ''
 
