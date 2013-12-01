@@ -64,7 +64,7 @@ def mount(args=None):
     distfs = ClowderFS(zk=zk, chunk_client=cc, fs_root=args.source)
 
     # FUSE
-    fuse = FUSE(distfs, args.directory, foreground=foreground, nothreads=nothreads, big_writes=True)
+    fuse = FUSE(distfs, args.directory, foreground=foreground, nothreads=nothreads, fsname=args.source, subtype='clowder', big_writes=True)
 
     # Cleanup
     zk.stop()
