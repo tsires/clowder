@@ -22,9 +22,10 @@ group.add_argument('-f', '--foreground', action='store_true')
 group.add_argument('-b', '--background', action='store_false', dest='foreground')
 mount_parser.add_argument('-c', '--chunk-cache', dest='chunk_cache')
 mount_parser.add_argument('-H', '--hash-data', action='store_true', dest='hash_data')
+mount_parser.add_argument('-d', '--debug', action='store_true')
 mount_parser.add_argument('source')
 mount_parser.add_argument('directory')
-mount_parser.set_defaults(foreground=True, chunk_cache='/tmp/chunkcache', hash_data=False)
+mount_parser.set_defaults(foreground=True, chunk_cache='/tmp/chunkcache', hash_data=False, debug=False)
 
 mkfs_parser = argparse.ArgumentParser(parents=[base_parser], description='Create a new Clowder filesystem tree.')
 mkfs_parser.add_argument('name')
@@ -34,9 +35,15 @@ mkfs_parser.set_defaults(chunk_size=64*1024)
 def mount(args=None):
     args = mount_parser.parse_args(args)
 
+    # Debug
+    foreground = args.foreground or args.debug
+    nothreads = args.debug
     # Log verbosity
     verbosity = args.verbose - args.quiet
-    log_level = logging.WARN - verbosity*10
+    if args.debug:
+        log_level = logging.DEBUG - verbosity*10
+    else:
+        log_level = logging.WARN - verbosity*10
 
     logging.basicConfig(level=log_level)
     logging.getLogger('kazoo.client').setLevel(log_level + 20)
@@ -57,7 +64,7 @@ def mount(args=None):
     distfs = ClowderFS(zk=zk, chunk_client=cc, fs_root=args.source)
 
     # FUSE
-    fuse = FUSE(distfs, args.directory, foreground=args.foreground, big_writes=True)
+    fuse = FUSE(distfs, args.directory, foreground=foreground, nothreads=nothreads, big_writes=True)
 
     # Cleanup
     zk.stop()
