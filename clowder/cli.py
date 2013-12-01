@@ -21,9 +21,10 @@ group = mount_parser.add_mutually_exclusive_group()
 group.add_argument('-f', '--foreground', action='store_true')
 group.add_argument('-b', '--background', action='store_false', dest='foreground')
 mount_parser.add_argument('-c', '--chunk-cache', dest='chunk_cache')
+mount_parser.add_argument('-H', '--hash-data', action='store_true', dest='hash_data')
 mount_parser.add_argument('source')
 mount_parser.add_argument('directory')
-mount_parser.set_defaults(foreground=True, chunk_cache='/tmp/chunkcache')
+mount_parser.set_defaults(foreground=True, chunk_cache='/tmp/chunkcache', hash_data=False)
 
 mkfs_parser = argparse.ArgumentParser(parents=[base_parser], description='Create a new Clowder filesystem tree.')
 mkfs_parser.add_argument('name')
@@ -50,7 +51,7 @@ def mount(args=None):
     zk.start()
 
     # ChunkClient
-    cc = LocalChunkClient(cache_path=args.chunk_cache)
+    cc = LocalChunkClient(cache_path=args.chunk_cache, hash_data=args.hash_data)
 
     # ClowderFS
     distfs = ClowderFS(zk=zk, chunk_client=cc, fs_root=args.source)

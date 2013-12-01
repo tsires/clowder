@@ -17,6 +17,9 @@ import mmh3
 from .common import *
 
 def chunk_hash(data):
+    return b16encode(mmh3.hash_bytes(data)).decode('ascii')
+
+def chunk_uuid(data):
     return b16encode(mmh3.hash_bytes(uuid1().bytes)).decode('ascii')
 
 ZERO = ''
@@ -205,11 +208,15 @@ class ChunkClient(object):
 class LocalChunkClient(ChunkClient):
     """ Simple, file-backed local chunk cache. """
 
-    def __init__(self, cache_path, **kwargs):
+    def __init__(self, cache_path, hash_data=False, **kwargs):
         super().__init__(**kwargs)
         self.cache_path = cache_path
         self.chunks = {}
         self.chunks[ZERO] = bytes(self.CHUNK_SIZE)
+        if hash_data:
+            self.chunk_hash = chunk_hash
+        else:
+            self.chunk_hash = chunk_uuid
 
     def put(self, data):
         """ Store chunk data, returning its key. """
