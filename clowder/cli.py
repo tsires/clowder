@@ -1,5 +1,6 @@
 __all__ = ['mkfs', 'mount']
 
+import posixpath
 import argparse
 import logging
 
@@ -8,6 +9,7 @@ from fuse import FUSE
 
 from .fs import ClowderFS
 from .chunkclient import LocalChunkClient
+from .common import *
 
 # Set up parsers
 base_parser = argparse.ArgumentParser(add_help=False)
@@ -48,11 +50,16 @@ def mount(args=None):
     logging.basicConfig(level=log_level)
     logging.getLogger('kazoo.client').setLevel(log_level + 20)
 
-    # Zookeeper
+    # ZK Path of filesystem root
+    zk_root = posixpath.join(FILESYSTEMS, args.source)
+
+    # Zookeeper servers
     if len(args.servers):
         zk_hosts = ','.join(args.servers)
     else:
         zk_hosts = '127.0.0.1:2181'
+
+    # Zookeeper client
     zk = KazooClient(hosts=zk_hosts)
 
     zk.start()
@@ -61,10 +68,10 @@ def mount(args=None):
     cc = LocalChunkClient(cache_path=args.chunk_cache, hash_data=args.hash_data)
 
     # ClowderFS
-    distfs = ClowderFS(zk=zk, chunk_client=cc, fs_root=args.source)
+    distfs = ClowderFS(zk=zk, chunk_client=cc, fs_root=zk_root)
 
     # FUSE
-    fuse = FUSE(distfs, args.directory, foreground=foreground, nothreads=nothreads, fsname=args.source, subtype='clowder', big_writes=True)
+    fuse = FUSE(distfs, args.directory, foreground=foreground, nothreads=nothreads, fsname=args.source, subtype='clowder', big_writes=True, modules='subdir', subdir=zk_root)
 
     # Cleanup
     zk.stop()
@@ -79,6 +86,9 @@ def mkfs(args=None):
     logging.basicConfig(level=log_level)
     logging.getLogger('kazoo.client').setLevel(log_level + 20)
 
+    # ZK Path of filesystem root
+    zk_root = posixpath.join(FILESYSTEMS, args.name)
+
     # Zookeeper
     if len(args.servers):
         zk_hosts = ','.join(args.servers)
@@ -89,7 +99,7 @@ def mkfs(args=None):
     zk.start()
 
     # Run
-    ClowderFS.mkfs(zk=zk, fs_root=args.name, chunk_size=args.chunk_size)
+    ClowderFS.mkfs(zk=zk, fs_root=zk_root, chunk_size=args.chunk_size)
 
     # Cleanup
     zk.stop()

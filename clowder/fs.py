@@ -54,6 +54,7 @@ class Cache(object):
         self._misses = 0
 
     def get(self, path):
+        path = path.rstrip('/')
         self._tries += 1
         try:
             return self._cache[path]
@@ -103,7 +104,7 @@ class ClowderFS(LoggingMixIn, Operations):
     def __init__(self, zk, chunk_client, fs_root):
         self.zk = zk
         self.chunk_client = chunk_client
-        self.fs_root = posixpath.join(self.FILESYSTEMS, fs_root)
+        self.fs_root = fs_root
         # Caches
         self._meta_cache = Cache(get=lambda p, w: File.loads(zk.get(p, w)))
         self._children_cache = Cache(get=zk.get_children)
@@ -119,7 +120,6 @@ class ClowderFS(LoggingMixIn, Operations):
 
     @classmethod
     def mkfs(cls, zk, fs_root, chunk_size):
-        fs_root = posixpath.join(FILESYSTEMS, fs_root)
         now = time()
         root_meta = File(dict(
             fs=dict(
@@ -147,11 +147,7 @@ class ClowderFS(LoggingMixIn, Operations):
     def _op_stub(self, op, *args):
         self.__log.debug('[STUB] %s: %r', op, args)
 
-    def _zk_path(self, path):
-        return posixpath.join(self.fs_root, path.lstrip('/')).rstrip('/')
-
     def chmod(self, path, mode):
-        path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_mode=mode)
@@ -165,7 +161,6 @@ class ClowderFS(LoggingMixIn, Operations):
         raise FuseOSError(EPERM)
 
     def create(self, path, mode):
-        path = self._zk_path(path)
         now = time()
         new_meta = File(dict(chunks=[],attrs=dict(
                 st_mode=(S_IFREG | mode),
@@ -187,14 +182,12 @@ class ClowderFS(LoggingMixIn, Operations):
 
     def getattr(self, path, fh=None):
         # TODO: get some info from the znode too
-        path = self._zk_path(path)
         try:
             return dict(self._get_meta(path)['attrs'], st_uid=self.uid, st_gid=self.gid)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
 
     def mkdir(self, path, mode):
-        path = self._zk_path(path)
         parent = posixpath.dirname(path)
         now = time()
         new_meta = File(dict(attrs=dict(
@@ -219,7 +212,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def open(self, path, flags):
-        path = self._zk_path(path)
         self.fd += 1
         self._open_files[self.fd] = BufferedWrite(path, self.fd)
         return self.fd
@@ -230,7 +222,6 @@ class ClowderFS(LoggingMixIn, Operations):
 
     def read(self, path, size, offset, fh):
         self._open_files[fh].flush(self._write)
-        path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
             return self.chunk_client.read_chunks(meta['chunks'], offset, offset+size)
@@ -239,14 +230,12 @@ class ClowderFS(LoggingMixIn, Operations):
 
     def readdir(self, path, fh):
         # TODO: include stat objects?
-        path = self._zk_path(path)
         try:
             return ['.', '..'] + self._get_children(path)
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
 
     def readlink(self, path):
-        path = self._zk_path(path)
         try:
             return self._get_meta(path)['target']
         except NoNodeError as e:
@@ -254,8 +243,6 @@ class ClowderFS(LoggingMixIn, Operations):
 
     def rename(self, oldpath, newpath):
         # FIXME: recurse over all elements in directory
-        oldpath = self._zk_path(oldpath)
-        newpath = self._zk_path(newpath)
         try:
             meta = self._get_meta(oldpath)
             trans = self.zk.transaction()
@@ -271,7 +258,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOTEMPTY) from e
 
     def rmdir(self, path):
-        path = self._zk_path(path)
         parent = posixpath.dirname(path)
         try:
             parent_meta = self._get_meta(parent)
@@ -294,7 +280,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def symlink(self, oldpath, newpath):
-        newpath = self._zk_path(newpath)
         now = time()
         new_meta = File(dict(target=oldpath,attrs=dict(
                 st_mode=(S_IFLNK | 0o777),
@@ -314,7 +299,6 @@ class ClowderFS(LoggingMixIn, Operations):
     def truncate(self, path, length, fh=None):
         if fh is not None:
             self._open_files[fh].flush(self._write)
-        path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
             meta['attrs'].update(st_size=length)
@@ -325,7 +309,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def unlink(self, path):
-        path = self._zk_path(path)
         try:
             self.zk.delete(path)
         except NoNodeError as e:
@@ -334,7 +317,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOTEMPTY) from e
 
     def utimens(self, path, times=None):
-        path = self._zk_path(path)
         now = time()
         atime, mtime = times if times else (now, now)
         try:
@@ -346,7 +328,6 @@ class ClowderFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOENT) from e
 
     def write(self, path, data, offset, fh):
-        path = self._zk_path(path)
         try:
             meta = self._get_meta(path)
             if offset+len(data) > meta['attrs']['st_size']:
