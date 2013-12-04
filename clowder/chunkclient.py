@@ -220,7 +220,7 @@ class LocalChunkClient(ChunkClient):
 
     def put(self, data):
         """ Store chunk data, returning its key. """
-        key = chunk_hash(data)
+        key = self.chunk_hash(data)
         self.chunks[key] = data
         # NOTE: could probably skip this step if the file exists
         with open(posixpath.join(self.cache_path, key), mode='wb') as f:
