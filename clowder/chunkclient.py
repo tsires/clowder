@@ -224,9 +224,10 @@ class LocalChunkClient(ChunkClient):
         """
         if not key:
             key = self.chunk_hash(data)
-        # NOTE: could probably skip this step if the file exists
-        with open(os.path.join(self.cache_path, key), mode='wb') as f:
-            f.write(data)
+        chunk_path = os.path.join(self.cache_path, key)
+        if not os.path.exists(chunk_path):
+            with open(chunk_path, mode='wb') as f:
+                f.write(data)
         return key
 
     def get(self, key):
