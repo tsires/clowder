@@ -24,7 +24,7 @@ from kazoo.protocol.states import EventType
 
 from .common import *
 from .exception import *
-from .chunkclient import LocalChunkClient
+from .chunk_client import LocalChunkClient
 
 class File(dict):
     __log = logging.getLogger('distfs.cache')

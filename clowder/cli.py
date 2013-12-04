@@ -8,7 +8,7 @@ from kazoo.client import KazooClient
 from fuse import FUSE
 
 from .fs import ClowderFS
-from .chunkclient import LocalChunkClient
+from .chunk_client import LocalChunkClient
 from .common import *
 
 # Set up parsers
