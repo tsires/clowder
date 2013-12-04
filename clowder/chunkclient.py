@@ -8,7 +8,6 @@ from __future__ import with_statement, division, print_function, absolute_import
 
 import os
 import logging
-import posixpath
 from base64 import b16encode
 from uuid import uuid1
 
@@ -228,7 +227,7 @@ class LocalChunkClient(ChunkClient):
             key = self.chunk_hash(data)
         self.chunks[key] = data
         # NOTE: could probably skip this step if the file exists
-        with open(posixpath.join(self.cache_path, key), mode='wb') as f:
+        with open(os.path.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
         return key
 
@@ -238,7 +237,7 @@ class LocalChunkClient(ChunkClient):
             return self.chunks[key]
         except KeyError:
             try:
-                with open(posixpath.join(self.cache_path, key), mode='rb') as f:
+                with open(os.path.join(self.cache_path, key), mode='rb') as f:
                     data = f.read()
                 self.chunks[key] = data
                 return data
@@ -247,7 +246,7 @@ class LocalChunkClient(ChunkClient):
 
     def garbage_collect(self, keys):
         for key in (set(os.listdir(self.cache_path)) - keys):
-            os.remove(posixpath.join(self.cache_path, key))
+            os.remove(os.path.join(self.cache_path, key))
             del self.chunks[key]
 
 
