@@ -14,6 +14,7 @@ from uuid import uuid1
 import mmh3
 
 from .common import *
+from .exception import *
 
 def chunk_hash(data):
     return b16encode(mmh3.hash_bytes(data)).decode('ascii')
@@ -237,7 +238,7 @@ class LocalChunkClient(ChunkClient):
         try:
             with open(os.path.join(self.cache_path, key), mode='rb') as f:
                 return f.read()
-        except FileNotFoundError as e:
+        except IOError as e:
             raise ChunkNotFoundError(key) from e
 
     def garbage_collect(self, keys):
