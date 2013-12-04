@@ -210,12 +210,11 @@ class LocalChunkClient(ChunkClient):
     def __init__(self, cache_path, hash_data=False, **kwargs):
         super().__init__(**kwargs)
         self.cache_path = cache_path
-        self.chunks = {}
-        self.chunks[ZERO] = bytes(self.CHUNK_SIZE)
         if hash_data:
             self.chunk_hash = chunk_hash
         else:
             self.chunk_hash = chunk_uuid
+        self.ZERO_CHUNK = bytes(self.CHUNK_SIZE)
 
     def put(self, data, key=None):
         """ Store chunk data, returning its key.
@@ -223,9 +222,8 @@ class LocalChunkClient(ChunkClient):
         If key is not given, one will be generated according to the selected scheme.
 
         """
-        if key is None:
+        if not key:
             key = self.chunk_hash(data)
-        self.chunks[key] = data
         # NOTE: could probably skip this step if the file exists
         with open(os.path.join(self.cache_path, key), mode='wb') as f:
             f.write(data)
@@ -233,23 +231,18 @@ class LocalChunkClient(ChunkClient):
 
     def get(self, key):
         """ Get the chunk data for the given numeric key. """
+        if not key:
+            return self.ZERO_CHUNK
         try:
-            return self.chunks[key]
-        except KeyError:
-            try:
-                with open(os.path.join(self.cache_path, key), mode='rb') as f:
-                    data = f.read()
-                self.chunks[key] = data
-                return data
-            except FileNotFoundError as e:
-                raise ChunkNotFoundError(key) from e
+            with open(os.path.join(self.cache_path, key), mode='rb') as f:
+                return f.read()
+        except FileNotFoundError as e:
+            raise ChunkNotFoundError(key) from e
 
     def garbage_collect(self, keys):
+        """ Purge all chunks from cache that are not in the given set of keys. """
         for key in (set(os.listdir(self.cache_path)) - keys):
             os.remove(os.path.join(self.cache_path, key))
-            del self.chunks[key]
-
-
 
 
 # vim: sw=4 ts=4 expandtab
