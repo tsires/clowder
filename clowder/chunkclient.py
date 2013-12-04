@@ -218,9 +218,14 @@ class LocalChunkClient(ChunkClient):
         else:
             self.chunk_hash = chunk_uuid
 
-    def put(self, data):
-        """ Store chunk data, returning its key. """
-        key = self.chunk_hash(data)
+    def put(self, data, key=None):
+        """ Store chunk data, returning its key.
+        
+        If key is not given, one will be generated according to the selected scheme.
+
+        """
+        if key is None:
+            key = self.chunk_hash(data)
         self.chunks[key] = data
         # NOTE: could probably skip this step if the file exists
         with open(posixpath.join(self.cache_path, key), mode='wb') as f:
