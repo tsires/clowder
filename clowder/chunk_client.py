@@ -10,6 +10,7 @@ import os
 import logging
 from base64 import b16encode
 from uuid import uuid1
+import concurrent.futures
 
 import mmh3
 
@@ -162,13 +163,14 @@ class ChunkClient(object):
         # Split data into fragments to be written into each chunk
         fragments = [data[max(0, s):s+self.CHUNK_SIZE] for s in range(-first_offset,len(data),self.CHUNK_SIZE)]
 
-        # Write first (possibly partial) chunk
-        keys[first_chunk:first_chunk+1] = self.write_into(keys[first_chunk:first_chunk+1], fragments[0], first_offset)
-        if last_chunk > first_chunk:
-            # Write whole chunks
-            keys[first_chunk+1:last_chunk] = (self.put(f) for f in fragments[1:-1])
-            # Write last (possibly partial) chunk
-            keys[last_chunk:last_chunk+1] = self.write_into(keys[last_chunk:last_chunk+1], fragments[-1])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            # Write first (possibly partial) chunk
+            keys[first_chunk:first_chunk+1] = self.write_into(keys[first_chunk:first_chunk+1], fragments[0], first_offset)
+            if last_chunk > first_chunk:
+                # Write whole chunks
+                keys[first_chunk+1:last_chunk] = list(executor.map(self.put, fragments[1:-1]))
+                # Write last (possibly partial) chunk
+                keys[last_chunk:last_chunk+1] = self.write_into(keys[last_chunk:last_chunk+1], fragments[-1])
 
         return keys
 
@@ -194,8 +196,9 @@ class ChunkClient(object):
             last_chunk = len(keys)-1
             last_offset = self.CHUNK_SIZE
 
-        # Start with whole chunks
-        chunks = list(self.get(k) for k in keys[first_chunk:last_chunk+1])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            # Start with whole chunks
+            chunks = list(executor.map(self.get, keys[first_chunk:last_chunk+1]))
 
         # Slice out portions of the first and last chunks
         if last_offset < self.CHUNK_SIZE:

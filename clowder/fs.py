@@ -50,6 +50,7 @@ class BufferedWrite(object):
         self._path = path
         self._fh = fh
         self._writes = []
+        self.count = 0
 
     def write(self, data, offset):
         if len(self._writes) and self._writes[-1][1] == offset:
@@ -57,12 +58,14 @@ class BufferedWrite(object):
             self._writes[-1][2].append(data)
         else:
             self._writes.append([offset, offset+len(data), [data]])
+        self.count += len(data)
         return len(data)
 
     def flush(self, func):
         for w in self._writes:
             func(self._path, b''.join(w[2]), w[0], self._fh)
         self._writes = []
+        self.count = 0
         return 0
 
 
@@ -189,6 +192,7 @@ class ClowderFS(LoggingMixIn, Operations):
         return self.fd
 
     def release(self, path, fh):
+        self._open_files[fh].flush(self._write)
         del self._open_files[fh]
         return 0
 
@@ -307,7 +311,11 @@ class ClowderFS(LoggingMixIn, Operations):
                 meta._dirty = True
         except NoNodeError as e:
             raise FuseOSError(ENOENT) from e
-        return self._open_files[fh].write(data, offset)
+        open_file = self._open_files[fh]
+        l = open_file.write(data, offset)
+        if open_file.count > 16*1024*1024:
+            open_file.flush(self._write)
+        return l
 
     def flush(self, path, fh):
         return self._open_files[fh].flush(self._write)
